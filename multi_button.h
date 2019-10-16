@@ -8,9 +8,11 @@
 
 #include "stdint.h"
 #include "string.h"
+/* For user configure ******************************************/
+#define REPEAT_MODE_ENABLE      (0)                             // 配置是否启用检测REPEAT功能，如果启用REPEAT功能，则在每次点击后，需要延时REPEAT_TICKS时间检测下次连击。
 
 #define COMBINE_MAX_KEY         3                               // 最多允许组合键个数，按键超过限制后，新的按键将被无视
-#define COMBINE_BTN_ID_NONE     (~(0U))                        // 组合按键，无效按键表示
+#define COMBINE_BTN_ID_NONE     (~(0U))                         // 组合按键，无效按键表示
 
 //According to your need to modify the constants.
 #define BTN_TICKS_INTERVAL      5 //ms                          // 定时周期，如果修改了，则定时扫描函数（button_ticks）的周期扫描时间需要同步调整

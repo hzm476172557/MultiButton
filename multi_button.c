@@ -181,13 +181,21 @@ void button_handler(struct Button *handle) {
                 if(handle->ticks >= SHORT_TICKS) {
                     // SHORT_TICKS has been occurred, then state 2 to wait REPEAT_TICKS
                     handle->event = (uint8_t)SINGLE_CLICK;
-                    handle->ticks = 0;
-                    handle->state = 2;
-                } else {
-                    // SHORT_TICKS has not been occurred, check Repeat mode.
-                    handle->ticks = 0;
-                    handle->state = 2;
                 }
+
+                handle->ticks = 0;
+#if (REPEAT_MODE_ENABLE != 0)
+                // If REPEAT_MODE is enabled, switch to state 2 detecting the repeat click.
+                handle->state = 2;
+#else
+
+                // If REPEAT_MODE is disabled, return to state 0 after press_up
+                if(handle->event == (uint8_t)SINGLE_CLICK) {
+                    EVENT_CB(SINGLE_CLICK);
+                }
+
+                handle->state = 0;
+#endif
             } else if(handle->ticks > LONG_TICKS) {
                 handle->event = (uint8_t)LONG_RRESS_START;
                 EVENT_CB(LONG_RRESS_START);
@@ -233,7 +241,8 @@ void button_handler(struct Button *handle) {
                 handle->state = 2;
             } else {
                 if(handle->ticks > LONG_TICKS) {
-                    handle->repeat-- ;  // Detected long press, ignore the last repeat.
+                    handle->repeat-- ;  // Detected long press, ignore the last repeat and upload the long_press event
+
                     if(handle->repeat == 2) {
                         handle->event = (uint8_t)DOUBLE_CLICK;
                         EVENT_CB(DOUBLE_CLICK); // repeat hit
@@ -257,7 +266,7 @@ void button_handler(struct Button *handle) {
                 if(handle->ticks > HOLD_PERIOD_TICKS) {
                     handle->event = (uint8_t)LONG_PRESS_HOLD;
                     EVENT_CB(LONG_PRESS_HOLD);
-                    handle->ticks = 0;
+                    handle->ticks = 0;  // clean the tick for next HOLD event.
                 }
 
             } else { //releasd
@@ -270,7 +279,7 @@ void button_handler(struct Button *handle) {
 
         case 6:
             if(handle->button_level == handle->active_level) {
-                // 如果当前还按着，则等待LONG_WAIT_TICKS之后，进入HOLD状态
+                // if user still pressing the button over LONG_WAIT_TICKS, go to state 5 to detect HOLD event.
                 if(handle->ticks > LONG_WAIT_TICKS) {
                     handle->event = (uint8_t)LONG_PRESS_HOLD;
                     EVENT_CB(LONG_PRESS_HOLD);
@@ -278,7 +287,8 @@ void button_handler(struct Button *handle) {
                     handle->state = 5;
                 }
 
-            } else { //releasd
+            } else {
+                // if user release the button before reaching LONG_WAIT_TICKS, go back to state 0 for idle
                 // 未到达LONG_WAIT_TICKS就释放按键，回到空闲状态
                 handle->event = (uint8_t)PRESS_UP;
                 EVENT_CB(PRESS_UP);
