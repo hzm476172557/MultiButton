@@ -63,8 +63,7 @@ static uint8_t _button_combine_add(uint16_t button_id) {
             btnComb.btnCombList[i] = button_id;
 
             btnComb.isChanged = 1;
-            result = 0;
-            break;
+            return 0;
         }
     }
 
@@ -72,19 +71,16 @@ static uint8_t _button_combine_add(uint16_t button_id) {
 }
 
 static uint8_t _button_combine_del(uint16_t button_id) {
-    int result = 1;
-
     for(uint16_t i = 0; i < COMBINE_MAX_KEY; i++) {
         if(btnComb.btnCombList[i] == button_id) {
             btnComb.btnCombList[i] = COMBINE_BTN_ID_NONE;
 
             btnComb.isChanged = 1;
-            result = 0;
             break;
         }
     }
 
-    return result;
+    return 0;
 }
 
 static void _button_set_combine_state(void) {
@@ -123,7 +119,8 @@ void button_combine_handler(void) {
         if(btnComb.counter == 0) {
             // 检测到所有按键都已经松开，将所有按键状态复原
             btnComb.ticks = 0;
-            btnComb.mode  = 0;
+            btnComb.isInvalid = 0;
+            btnComb.isChanged = 0;
             _button_reset_combine_state();
         } else {
             if(btnComb.mode == 1) {
@@ -143,6 +140,11 @@ void button_combine_handler(void) {
                     // detected pressing buttons changed, reset the ticks.
                     btnComb.ticks     = 0;
                     btnComb.isChanged = 0;
+                }
+
+                if(btnComb.isInvalid != 0) {
+                    // InValid Combine Buttons detected, ignore this combine event and wait untill all buttons released.
+                    btnComb.mode  = 3;
                 }
             }
         }
@@ -258,7 +260,9 @@ void button_handler(struct Button *handle) {
 #if (COMBINE_MODE_ENABLE > 0)
 
     if(handle->event != NONE_PRESS) {
-        btnComb.isInvalid = _button_combine_add(handle->button_id);
+        if(btnComb.isInvalid == 0) {
+            btnComb.isInvalid = _button_combine_add(handle->button_id);
+        }
     }
 
 #endif
