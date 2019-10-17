@@ -9,13 +9,19 @@
 #include "stdint.h"
 #include "string.h"
 /* For user configure ******************************************/
-#define REPEAT_MODE_ENABLE      (0)                             // 配置是否启用检测REPEAT功能，如果启用REPEAT功能，则在每次点击后，需要延时REPEAT_TICKS时间检测下次连击。
+// 配置是否启用检测REPEAT(包括DoubleClick)功能，如果启用REPEAT功能，则在每次点击后，需要延时REPEAT_TICKS时间检测下次连击。
+#define REPEAT_MODE_ENABLE      (1)
+
+// 配置是否启用组合按键功能，如果启用组合按键，则在每次检测按键周期内，处理的代码增多，可能导致中断处理过长
+// 建议增长按键扫描间隔BTN_TICKS_INTERVAL 10ms.
+// 启用COMBINE模式后，当1个以上按键按下(进入组合键模式)，除去PRESS_DOWN和PRESS_UP，不会再触发单个按键的其它事件。直到所有按键都松开，恢复所有按键为空闲状态。
+#define COMBINE_MODE_ENABLE     (1)
 
 #define COMBINE_MAX_KEY         3                               // 最多允许组合键个数，按键超过限制后，新的按键将被无视
-#define COMBINE_BTN_ID_NONE     (~(0U))                         // 组合按键，无效按键表示
+#define COMBINE_BTN_ID_NONE     (-1)                            // 组合按键，无效按键表示
 
 //According to your need to modify the constants.
-#define BTN_TICKS_INTERVAL      5 //ms                          // 定时周期，如果修改了，则定时扫描函数（button_ticks）的周期扫描时间需要同步调整
+#define BTN_TICKS_INTERVAL      10 //ms                         // 定时周期，如果修改了，则定时扫描函数（button_ticks）的周期扫描时间需要同步调整
 #define DEBOUNCE_TICKS          3 //MAX 64                      // 去抖时间
 #define SHORT_TICKS             (50     / BTN_TICKS_INTERVAL)   // 触发短按的时间
 #define REPEAT_TICKS            (100    / BTN_TICKS_INTERVAL)   // 反复按键限定时间。在触发SHORT按键后，在该限定事件内再次按键，则进入反复按键模式。超时未再按键，则判定为松开
@@ -35,7 +41,6 @@ typedef enum {
     LONG_RRESS_START,
     LONG_PRESS_HOLD,
     number_of_event,
-    COMBINE_PRESS,
     NONE_PRESS
 } PressEvent;
 
@@ -67,8 +72,11 @@ int  button_start(struct Button *handle);
 void button_stop(struct Button *handle);
 void button_ticks(void);
 
+#if (COMBINE_MODE_ENABLE > 0)
 uint8_t button_combine_check(uint16_t button_id);
-void button_combine_set_callback(BtnCallback cb);
+void button_combine_event_attach(BtnCallback cb);
+void button_combine_event_detach(void);
+#endif
 
 #ifdef __cplusplus
 }
