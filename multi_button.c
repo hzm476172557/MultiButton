@@ -6,29 +6,63 @@
 #include "multi_button.h"
 
 #define EVENT_CB(ev)        if(handle->cb[ev]) handle->cb[ev]((Button*)handle)
-#define COMBINE_EVENT_CB()  if(combine_callback) combine_callback(combine_counter)
-
 //button handle list head.
 static struct Button *head_handle = NULL;
 
-// calculate the number of combine keys now.
-static uint32_t combine_counter = 0;
-static int32_t combine_button_id_list[COMBINE_MAX_KEY];
-// combine callback function
-static BtnCallback combine_callback = NULL;
+#if (COMBINE_MODE_ENABLE > 0)
 
-static int _button_combine_add(uint16_t button_id) {
-    int result = -1;
+#define COMBINE_EVENT_CB()  if(btnComb.cb) btnComb.cb(NULL)
+
+typedef struct _ButtonCombine {
+    // combine pressing buttons counter
+    // record the number of current pressing buttons.
+    uint16_t    counter;
+
+    // when detected combine buttons, ticks start to count the time from the beginning.
+    // when ticks count greater than COMBINE_TICKS define, COMBINE_EVENT_CB will be call to report to app.
+    uint16_t    ticks;
+
+    // combine buttons invalid flag.
+    // Combine invalid if number of current pressing buttons greater than COMBINE_MAX_KEY define.
+    // 0 means current combine buttons is valid.
+    // 1 means current combine buttons is invalid.
+    uint8_t     isInvalid : 1;
+
+    // combine buttons change flag.
+    // 0 means none change since last combine pressing.
+    // 1 means detected the pressing buttons changes.Neet to reset ticks.
+    uint8_t     isChanged : 1;
+    // Combine Mode :
+    //   0 means none combine button
+    //   1 means detected combine buttons
+    //   2 means tick counter finished and callback func has been called
+    uint8_t     mode : 6;
+
+    // combine buttons pressing list.stores current pressing combine buttons.
+    // each element value is the each id of the pressing buttons. COMBINE_BTN_ID_NONE means no buttons in this element.
+    // COMBINE_MAX_KEY defines the maximum combine buttons allowed at a time.
+    int32_t btnCombList[COMBINE_MAX_KEY];
+
+    // combine event callback function
+    BtnCallback cb;
+} BtnCombT;
+
+static volatile BtnCombT btnComb;
+
+static uint8_t _button_combine_add(uint16_t button_id) {
+    int result = 1;
 
     for(uint16_t i = 0; i < COMBINE_MAX_KEY; i++) {
-        if(combine_button_id_list[i] == button_id) {
+        if(btnComb.btnCombList[i] == button_id) {
             return 0;   // already added.
         }
     }
 
     for(uint16_t i = 0; i < COMBINE_MAX_KEY; i++) {
-        if(combine_button_id_list[i] == COMBINE_BTN_ID_NONE) {
-            combine_button_id_list[i] = button_id;
+        if(btnComb.btnCombList[i] == COMBINE_BTN_ID_NONE) {
+            btnComb.btnCombList[i] = button_id;
+
+            btnComb.isChanged = 1;
             result = 0;
             break;
         }
@@ -37,22 +71,87 @@ static int _button_combine_add(uint16_t button_id) {
     return result;
 }
 
-static int _button_combine_del(uint16_t button_id) {
-    int result = -1;
+static uint8_t _button_combine_del(uint16_t button_id) {
+    int result = 1;
 
     for(uint16_t i = 0; i < COMBINE_MAX_KEY; i++) {
-        if(combine_button_id_list[i] == button_id) {
-            combine_button_id_list[i] = COMBINE_BTN_ID_NONE;
+        if(btnComb.btnCombList[i] == button_id) {
+            btnComb.btnCombList[i] = COMBINE_BTN_ID_NONE;
+
+            btnComb.isChanged = 1;
             result = 0;
             break;
         }
     }
 
     return result;
+}
+
+static void _button_set_combine_state(void) {
+    struct Button *target;
+
+    btnComb.mode = 1;
+
+    for(target = head_handle; target; target = target->next) {
+        if(target->event != (uint8_t)NONE_PRESS && target->event != (uint8_t)PRESS_UP) {
+            target->event = (uint8_t)PRESS_DOWN;    // 其它按键只要是处于按下状态的，全部设置为PRESS_DOWN
+        } else {
+            target->event = (uint8_t)NONE_PRESS;
+        }
+
+        target->debounce_cnt = 0;
+        target->ticks = 0;
+        target->state = 7;  // 所有按键进入combine 状态(state 7)
+    }
+}
+
+static void _button_reset_combine_state(void) {
+    struct Button *target;
+
+    btnComb.mode = 0;
+
+    for(target = head_handle; target; target = target->next) {
+        target->event = NONE_PRESS;
+        target->debounce_cnt = 0;
+        target->ticks = 0;
+        target->state = 0;  // 所有按键恢复到state 0状态
+    }
+}
+
+void button_combine_handler(void) {
+    if(btnComb.mode > 0) {
+        if(btnComb.counter == 0) {
+            // 检测到所有按键都已经松开，将所有按键状态复原
+            btnComb.ticks = 0;
+            btnComb.mode  = 0;
+            _button_reset_combine_state();
+        } else {
+            if(btnComb.mode == 1) {
+                // not finish combine function yet.
+                if(btnComb.isChanged == 0) {
+                    btnComb.ticks++;
+
+                    if(btnComb.ticks > COMBINE_TICKS) {
+                        if(btnComb.isInvalid == 0) {
+                            // finish combine function, call the COMBINE_EVENT_CB to report to app.
+                            COMBINE_EVENT_CB();
+                            // after report, do nothing untill all buttons released.
+                            btnComb.mode  = 2;
+                        }
+                    }
+                } else {
+                    // detected pressing buttons changed, reset the ticks.
+                    btnComb.ticks     = 0;
+                    btnComb.isChanged = 0;
+                }
+            }
+        }
+    }
 }
 
 /**
   * @brief  Check if the specified button_id is in Combine Keys.Used when CombineEvent occurred.
+  *         User can use this to check if button_id in the CombineBottonList or not in the callback func.
   * @param  button_id: the specified button id to check.
   * @retval 0 : not in CombineKeys. others : in CombineKeys
   */
@@ -60,7 +159,7 @@ uint8_t button_combine_check(uint16_t button_id) {
     uint8_t result = 0;
 
     for(uint16_t i = 0; i < COMBINE_MAX_KEY; i++) {
-        if(combine_button_id_list[i] == button_id) {
+        if(btnComb.btnCombList[i] == button_id) {
             result = 1;
             break;
         }
@@ -69,6 +168,25 @@ uint8_t button_combine_check(uint16_t button_id) {
     return result;
 }
 
+/**
+  * @brief  Attach the combine key event callback function.
+  * @param  cb: callback function.
+  * @retval None
+  */
+void button_combine_event_attach(BtnCallback cb) {
+    btnComb.cb = cb;
+}
+
+/**
+  * @brief  Detach the combine key event callback function.
+  * @retval None
+  */
+void button_combine_event_detach(void) {
+    btnComb.cb = NULL;
+}
+
+
+#endif
 
 /**
   * @brief  Initializes the button struct handle.
@@ -99,16 +217,6 @@ void button_attach(struct Button *handle, PressEvent event, BtnCallback cb) {
         handle->cb[event] = cb;
     }
 }
-
-/**
-  * @brief  Attach the combine key event callback function.
-  * @param  cb: callback function.
-  * @retval None
-  */
-void button_combine_event_attach(BtnCallback cb) {
-    combine_callback = cb;
-}
-
 
 /**
   * @brief  Inquire the button event happen.
@@ -147,28 +255,77 @@ void button_handler(struct Button *handle) {
         handle->debounce_cnt = 0;
     }
 
+#if (COMBINE_MODE_ENABLE > 0)
+
     if(handle->event != NONE_PRESS) {
-        _button_combine_add(handle->button_id);
+        btnComb.isInvalid = _button_combine_add(handle->button_id);
     }
+
+#endif
 
     /*-----------------State machine-------------------*/
     switch(handle->state) {
         case 0:
             if(handle->button_level == handle->active_level) {      //start press down
-                combine_counter++;
+#if (COMBINE_MODE_ENABLE > 0)
+                btnComb.counter++;
+#endif
                 handle->event = (uint8_t)PRESS_DOWN;
                 EVENT_CB(PRESS_DOWN);
                 handle->ticks = 0;
                 handle->repeat = 1;
-                handle->state = 1;
-            } else {
-                if(handle->event != (uint8_t)NONE_PRESS) {
-                    handle->event = (uint8_t)NONE_PRESS;
-                    handle->ticks = 0;
-                    combine_counter--;
+#if (COMBINE_MODE_ENABLE > 0)
+
+                if(btnComb.counter > 1) {
+                    // 检测到有组合按键，设置所有按键进入组合按键模式
+                    //handle->state = 7;
+                    _button_set_combine_state();
+                } else {
+                    handle->state = 1;
                 }
 
-                _button_combine_del(handle->button_id);
+#else
+                handle->state = 1;
+#endif
+            } else {
+                if(handle->event != (uint8_t)NONE_PRESS) {
+                    handle->ticks = 0;
+                    handle->event = (uint8_t)NONE_PRESS;
+#if (COMBINE_MODE_ENABLE > 0)
+                    btnComb.counter--;
+#endif
+                }
+
+#if (COMBINE_MODE_ENABLE > 0)
+                btnComb.isInvalid = _button_combine_del(handle->button_id);
+#endif
+            }
+
+            break;
+
+        case 7:
+            if(handle->button_level == handle->active_level) {
+                if(handle->event != (uint8_t)PRESS_DOWN) {
+#if (COMBINE_MODE_ENABLE > 0)
+                    btnComb.counter++;
+#endif
+                    handle->event = (uint8_t)PRESS_DOWN;
+                    EVENT_CB(PRESS_DOWN);
+                    handle->ticks  = 0;
+                    handle->repeat = 1;
+                }
+            } else {
+                if(handle->event != (uint8_t)NONE_PRESS) {
+                    handle->event = (uint8_t)PRESS_UP;
+                    EVENT_CB(PRESS_UP);
+                    handle->event = (uint8_t)NONE_PRESS;
+
+                    handle->ticks = 0;
+#if (COMBINE_MODE_ENABLE > 0)
+                    btnComb.counter--;
+                    btnComb.isInvalid = _button_combine_del(handle->button_id);
+#endif
+                }
             }
 
             break;
@@ -220,10 +377,10 @@ void button_handler(struct Button *handle) {
                         }
                     } else if(handle->repeat == 2) {
                         handle->event = (uint8_t)DOUBLE_CLICK;
-                        EVENT_CB(DOUBLE_CLICK); // repeat hit
+                        EVENT_CB(DOUBLE_CLICK);    // repeat hit
                     } else {
-                        handle->event = (uint8_t)PRESS_REPEAT;
-                        EVENT_CB(PRESS_REPEAT); // repeat hit
+                        //handle->event = (uint8_t)PRESS_REPEAT;
+                        EVENT_CB(PRESS_REPEAT);    // repeat hit
                     }
 
                     handle->state = 0;
@@ -237,6 +394,7 @@ void button_handler(struct Button *handle) {
                 handle->event = (uint8_t)PRESS_UP;
                 EVENT_CB(PRESS_UP);
 
+                handle->event = NONE_PRESS;
                 handle->ticks = 0;
                 handle->state = 2;
             } else {
@@ -245,10 +403,10 @@ void button_handler(struct Button *handle) {
 
                     if(handle->repeat == 2) {
                         handle->event = (uint8_t)DOUBLE_CLICK;
-                        EVENT_CB(DOUBLE_CLICK); // repeat hit
+                        EVENT_CB(DOUBLE_CLICK);    // repeat hit
                     } else {
-                        handle->event = (uint8_t)PRESS_REPEAT;
-                        EVENT_CB(PRESS_REPEAT); // repeat hit
+                        //handle->event = (uint8_t)PRESS_REPEAT;
+                        EVENT_CB(PRESS_REPEAT);    // repeat hit
                     }
 
                     handle->event = (uint8_t)LONG_RRESS_START;
@@ -352,14 +510,18 @@ void button_ticks() {
         button_handler(target);
     }
 
+#if (COMBINE_MODE_ENABLE > 0)
     /* Check current keys. If has combine keys, it will be setted to combine mode */
+    button_combine_handler();
+#endif
 }
 
 void multi_button_init(void) {
-    memset(combine_button_id_list, COMBINE_BTN_ID_NONE, COMBINE_MAX_KEY * sizeof(combine_button_id_list[0]));
-    combine_counter = 0;
-    combine_callback = NULL;
-
+#if (COMBINE_MODE_ENABLE > 0)
+    memset((void *)&btnComb, 0, sizeof(btnComb));
+    memset((void *)btnComb.btnCombList, COMBINE_BTN_ID_NONE, COMBINE_MAX_KEY * sizeof(btnComb.btnCombList[0]));
+    btnComb.cb = NULL;
+#endif
     head_handle = NULL;
 }
 
