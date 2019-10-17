@@ -72,7 +72,7 @@ int  button_start(struct Button *handle);
 void button_stop(struct Button *handle);
 void button_ticks(void);
 
-#if (COMBINE_MODE_ENABLE > 0)
+#if (COMBINE_MODE_ENABLE > 0) 
 uint8_t button_combine_check(uint16_t button_id);
 void button_combine_event_attach(BtnCallback cb);
 void button_combine_event_detach(void);
