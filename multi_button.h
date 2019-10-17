@@ -76,7 +76,11 @@ void button_ticks(void);
 uint8_t button_combine_check(uint16_t button_id);
 void button_combine_event_attach(BtnCallback cb);
 void button_combine_event_detach(void);
+<<<<<<< HEAD
 #endif
+=======
+
+>>>>>>> 885d2d0f96a1c82cb40d41e5b2dff303f5168870
 
 #ifdef __cplusplus
 }
