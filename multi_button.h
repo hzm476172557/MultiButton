@@ -10,6 +10,7 @@
 #include "string.h"
 /* For user configure ******************************************/
 // 配置是否启用检测REPEAT(包括DoubleClick)功能，如果启用REPEAT功能，则在每次点击后，需要延时REPEAT_TICKS时间检测下次连击。
+// 因此为了按键的灵敏性，建议如果应用不用检测DoubleClick或者连击功能，则不启用该模式
 #define REPEAT_MODE_ENABLE      (1)
 
 // 配置是否启用组合按键功能，如果启用组合按键，则在每次检测按键周期内，处理的代码增多，可能导致中断处理过长
@@ -17,17 +18,17 @@
 // 启用COMBINE模式后，当1个以上按键按下(进入组合键模式)，除去PRESS_DOWN和PRESS_UP，不会再触发单个按键的其它事件。直到所有按键都松开，恢复所有按键为空闲状态。
 #define COMBINE_MODE_ENABLE     (1)
 
-#define COMBINE_MAX_KEY         3                               // 最多允许组合键个数，按键超过限制后，新的按键将被无视
+#define COMBINE_MAX_KEY         2                               // 最多允许组合键个数，按键超过限制后，新的按键将被无视
 #define COMBINE_BTN_ID_NONE     (-1)                            // 组合按键，无效按键表示
 
 //According to your need to modify the constants.
 #define BTN_TICKS_INTERVAL      10 //ms                         // 定时周期，如果修改了，则定时扫描函数（button_ticks）的周期扫描时间需要同步调整
 #define DEBOUNCE_TICKS          3 //MAX 64                      // 去抖时间
 #define SHORT_TICKS             (50     / BTN_TICKS_INTERVAL)   // 触发短按的时间
-#define REPEAT_TICKS            (100    / BTN_TICKS_INTERVAL)   // 反复按键限定时间。在触发SHORT按键后，在该限定事件内再次按键，则进入反复按键模式。超时未再按键，则判定为松开
-#define LONG_TICKS              (1000   / BTN_TICKS_INTERVAL)   // 触发长按的时间
+#define REPEAT_TICKS            (50    / BTN_TICKS_INTERVAL)   // 反复按键限定时间。在触发SHORT按键后，在该限定事件内再次按键，则进入反复按键模式。超时未再按键，则判定为松开
+#define LONG_TICKS              (2000   / BTN_TICKS_INTERVAL)   // 触发长按的时间
 #define LONG_WAIT_TICKS         (500    / BTN_TICKS_INTERVAL)   // 触发长按后，等待该时间后，才开始检测HOLD，避免长按结束立刻触发HOLD
-#define HOLD_PERIOD_TICKS       (200    / BTN_TICKS_INTERVAL)   // 保持长按时，每次上报处于长按状态的间隔时间
+#define HOLD_PERIOD_TICKS       (300    / BTN_TICKS_INTERVAL)   // 保持长按时，每次上报处于长按状态的间隔时间
 #define COMBINE_TICKS           (5000   / BTN_TICKS_INTERVAL)   // 出现组合按键后，按超过该事件才会上报组合按键事件
 
 typedef void (*BtnCallback)(void *);
