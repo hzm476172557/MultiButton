@@ -11,7 +11,8 @@ static struct Button *head_handle = NULL;
 
 #if (COMBINE_MODE_ENABLE > 0)
 
-#define COMBINE_EVENT_CB()  if(btnComb.cb) btnComb.cb(NULL)
+// Callback function to upload combine event to user. User can use button_combine_check() to check combine buttons id.
+#define COMBINE_EVENT_CB(param)  if(btnComb.cb) btnComb.cb(param)
 
 typedef struct _ButtonCombine {
     // combine pressing buttons counter
@@ -19,7 +20,7 @@ typedef struct _ButtonCombine {
     uint16_t    counter;
 
     // when detected combine buttons, ticks start to count the time from the beginning.
-    // when ticks count greater than COMBINE_TICKS define, COMBINE_EVENT_CB will be call to report to app.
+    // when ticks count greater than COMBINE_LONG_TICKS define, COMBINE_EVENT_CB will be call to report to app.
     uint16_t    ticks;
 
     // combine buttons invalid flag.
@@ -36,16 +37,27 @@ typedef struct _ButtonCombine {
     //   0 means none combine button
     //   1 means detected combine buttons
     //   2 means tick counter finished and callback func has been called
-    uint8_t     mode : 6;
+    //   3 means invalid combine buttons detected, do nothing then.
+    uint8_t     mode : 5;
+
+    // Combine short_press detect flag :
+    //   0 means none short press
+    //   1 means detected short combine press
+    uint8_t     short_press : 1;
+
+    // combine buttons pressing list to stores pressing combine buttons when short pressed.
+    int32_t btnCombListForShortPress[COMBINE_MAX_KEY];
 
     // combine buttons pressing list.stores current pressing combine buttons.
     // each element value is the each id of the pressing buttons. COMBINE_BTN_ID_NONE means no buttons in this element.
     // COMBINE_MAX_KEY defines the maximum combine buttons allowed at a time.
     int32_t btnCombList[COMBINE_MAX_KEY];
 
+
+
     // combine event callback function
     BtnCallback cb;
-} BtnCombT;
+} __attribute__((packed)) BtnCombT;
 
 static volatile BtnCombT btnComb;
 
@@ -117,21 +129,40 @@ static void _button_reset_combine_state(void) {
 void button_combine_handler(void) {
     if(btnComb.mode > 0) {
         if(btnComb.counter == 0) {
-            // 检测到所有按键都已经松开，将所有按键状态复原
+            // 检测到所有按键都已经松开
+            // 检测是否达到组合键短按条件
+            if(btnComb.short_press != 0) {
+                if(btnComb.mode < 2) {
+                    // 尚未触发组合按键的长按，上报上层告知出现短按
+                    memcpy((void *)btnComb.btnCombList, (void *)btnComb.btnCombListForShortPress, sizeof(btnComb.btnCombList));
+                    COMBINE_EVENT_CB((void *)COMBINE_SHORT);
+                }
+            }
+
+            // 将按键松开
             btnComb.ticks = 0;
             btnComb.isInvalid = 0;
             btnComb.isChanged = 0;
+            btnComb.short_press = 0;
+            memset((void *)btnComb.btnCombListForShortPress, COMBINE_BTN_ID_NONE, COMBINE_MAX_KEY * sizeof(btnComb.btnCombListForShortPress[0]));
             _button_reset_combine_state();
         } else {
-            if(btnComb.mode == 1) {
+            if(btnComb.mode == 1 && btnComb.counter > 1) {
                 // not finish combine function yet.
                 if(btnComb.isChanged == 0) {
                     btnComb.ticks++;
 
-                    if(btnComb.ticks > COMBINE_TICKS) {
+                    if(btnComb.ticks > COMBINE_SHORT_TICKS) {
+                        // 到达组合按键短按的识别，将当前按键组合记录到短按内
+                        btnComb.short_press = 1;
+                        memcpy((void *)btnComb.btnCombListForShortPress, (void *)btnComb.btnCombList, sizeof(btnComb.btnCombListForShortPress));
+                    }
+
+                    if(btnComb.ticks > COMBINE_LONG_TICKS) {
                         if(btnComb.isInvalid == 0) {
+                            btnComb.short_press = 0;
                             // finish combine function, call the COMBINE_EVENT_CB to report to app.
-                            COMBINE_EVENT_CB();
+                            COMBINE_EVENT_CB((void *)COMBINE_LONG);
                             // after report, do nothing untill all buttons released.
                             btnComb.mode  = 2;
                         }
@@ -140,11 +171,39 @@ void button_combine_handler(void) {
                     // detected pressing buttons changed, reset the ticks.
                     btnComb.ticks     = 0;
                     btnComb.isChanged = 0;
+                    memset((void *)btnComb.btnCombListForShortPress, COMBINE_BTN_ID_NONE, COMBINE_MAX_KEY * sizeof(btnComb.btnCombListForShortPress[0]));
                 }
 
                 if(btnComb.isInvalid != 0) {
+#if (COMBINE_INVALID_MODE == 1)
                     // InValid Combine Buttons detected, ignore this combine event and wait untill all buttons released.
                     btnComb.mode  = 3;
+#endif
+                }
+            } else if(btnComb.mode == 1 && btnComb.counter == 1) {
+                // 处于mode = 1，但是检测到当前只有一个按键按着
+                if(btnComb.isChanged == 0) {
+
+                    btnComb.ticks++;
+
+                    if(btnComb.ticks > COMBINE_INVALID_TICKS) {
+#if (COMBINE_INVALID_MODE == 0)   // 是否需要设置为这种情况超时后，退出组合键模式
+                        // 超时，退出组合按键模式
+                        btnComb.ticks = 0;
+                        btnComb.isInvalid = 0;
+                        btnComb.isChanged = 0;
+                        btnComb.counter = 0;
+                        _button_reset_combine_state();
+#else   // 如果不退出组合键模式，则超时后进入无效组合键模式，直到松开所有按键重新触发按键
+                        btnComb.ticks = 0;
+                        btnComb.isInvalid = 1;
+                        btnComb.mode  = 3;
+#endif
+                    }
+
+                } else {
+                    btnComb.ticks = 0;
+                    btnComb.isChanged = 0;
                 }
             }
         }
@@ -282,7 +341,6 @@ void button_handler(struct Button *handle) {
 
                 if(btnComb.counter > 1) {
                     // 检测到有组合按键，设置所有按键进入组合按键模式
-                    //handle->state = 7;
                     _button_set_combine_state();
                 } else {
                     handle->state = 1;
@@ -524,6 +582,7 @@ void multi_button_init(void) {
 #if (COMBINE_MODE_ENABLE > 0)
     memset((void *)&btnComb, 0, sizeof(btnComb));
     memset((void *)btnComb.btnCombList, COMBINE_BTN_ID_NONE, COMBINE_MAX_KEY * sizeof(btnComb.btnCombList[0]));
+    memset((void *)btnComb.btnCombListForShortPress, COMBINE_BTN_ID_NONE, COMBINE_MAX_KEY * sizeof(btnComb.btnCombListForShortPress[0]));
     btnComb.cb = NULL;
 #endif
     head_handle = NULL;
